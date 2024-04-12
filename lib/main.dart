@@ -10,8 +10,14 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: BlocProvider(
-        create: (context) => AuthenticationBloc(UserRepository()),
+      home: MultiBlocProvider(
+        providers: [
+          BlocProvider(
+              create: (context) => AuthenticationBloc(UserRepository())),
+          BlocProvider(
+              create: (context) =>
+                  UserSettingsBloc(SharedPreferences.getInstance())),
+        ],
         child: AuthenticationPage(),
       ),
     );
@@ -40,6 +46,8 @@ class _AuthenticationPageState extends State<AuthenticationPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text('Logged In!'),
+                  Text('Email: ${state.email}'), // Display the email
+                  Text('Password: ${state.password}'), // Display the password
                   ElevatedButton(
                     onPressed: () =>
                         context.read<AuthenticationBloc>().add(LoggedOut()),
@@ -100,13 +108,19 @@ abstract class AuthenticationState {}
 
 class AuthenticationUnauthenticated extends AuthenticationState {}
 
-class AuthenticationAuthenticated extends AuthenticationState {}
+class AuthenticationAuthenticated extends AuthenticationState {
+  final String email;
+  final String password;
+
+  AuthenticationAuthenticated(this.email, this.password);
+}
 
 abstract class AuthenticationEvent {}
 
 class LoggedIn extends AuthenticationEvent {
   final String email;
   final String password;
+
   LoggedIn(this.email, this.password);
 }
 
@@ -122,7 +136,7 @@ class AuthenticationBloc
       final isAuthenticated =
           await userRepository.authenticate(event.email, event.password);
       if (isAuthenticated) {
-        emit(AuthenticationAuthenticated());
+        emit(AuthenticationAuthenticated(event.email, event.password));
       } else {
         emit(AuthenticationUnauthenticated());
       }
@@ -150,3 +164,53 @@ class UserRepository {
     await prefs.setBool('isAuthenticated', false);
   }
 }
+
+class UserSettingsBloc extends Bloc<UserSettingsEvent, UserSettingsState> {
+  final Future<SharedPreferences> prefsFuture;
+
+  UserSettingsBloc(this.prefsFuture) : super(SettingsLoading()) {
+    on<LoadSettings>((event, emit) async {
+      try {
+        final prefs = await prefsFuture;
+        var settings = {
+          'theme': prefs.getString('theme') ?? 'light',
+          'language': prefs.getString('language') ?? 'English',
+        };
+        emit(SettingsLoaded(settings));
+      } catch (e) {
+        emit(SettingsError());
+      }
+    });
+
+    on<UpdateSettings>((event, emit) async {
+      try {
+        final prefs = await prefsFuture;
+        await prefs.setString('theme', event.settings['theme']);
+        await prefs.setString('language', event.settings['language']);
+        emit(SettingsLoaded(event.settings));
+      } catch (e) {
+        emit(SettingsError());
+      }
+    });
+  }
+}
+
+abstract class UserSettingsEvent {}
+
+class LoadSettings extends UserSettingsEvent {}
+
+class UpdateSettings extends UserSettingsEvent {
+  final Map<String, dynamic> settings;
+  UpdateSettings(this.settings);
+}
+
+abstract class UserSettingsState {}
+
+class SettingsLoading extends UserSettingsState {}
+
+class SettingsLoaded extends UserSettingsState {
+  final Map<String, dynamic> settings;
+  SettingsLoaded(this.settings);
+}
+
+class SettingsError extends UserSettingsState {}
